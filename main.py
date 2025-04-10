@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
+import geopandas as gpd
+from streamlit_folium import st_folium
+import folium
+from shapely.geometry import Point
 import seaborn as sns
 from io import StringIO
 from sklearn.cluster import KMeans
@@ -49,7 +53,7 @@ df["Țara"] = df["Țara"].astype(str)
 
 # Bara laterală pentru navigare între secțiuni
 section = st.sidebar.radio("Navigați la:",
-                           ["Prezentare Date", "Analiza Exploratorie", "Analiza Avansată", "Regresie Multiplă", "Clasificare", "Funcții Suplimentare"])
+                           ["Prezentare Date", "Analiza Exploratorie", "Analiza Avansată", "Analiză Geospațială" ,"Regresie Multiplă", "Clasificare", "Funcții Suplimentare"])
 
 #########################################
 # Secțiunea: Prezentare Date
@@ -319,7 +323,71 @@ elif section == "Analiza Avansată":
             # valori mici = punctele din fiecare cluster sunt foarte apropiate între ele = clustere compacte
             # valori mari = unctele sunt dispersate, indicând clustere mai puțin bine definite
 
+#########################################
+# Secțiunea: ANALIZA GEOSPATIALA
+#########################################
+elif section == "Analiză Geospațială":
+    st.subheader("Analiză Geospațială")
+    world = None
+    # Încărcăm datasetul Natural Earth Low Resolution din GeoPandas,
+    # care conține frontierele tuturor țărilor la nivel global.
+    try:
+        world = gpd.read_file("geodata/ne_110m_admin_0_countries.shp")
+        #st.success("Shapefile încărcat cu succes!")
+    except Exception as e:
+        st.error(f"Eroare: {e}")
+    #st.write(world.columns)
 
+    if world is not None:
+        # Pentru merge este esențial să avem o coloană comună.
+        # Inspectează world.columns pentru a identifica câmpul de denumire – de obicei este "ADMIN"
+        #st.write("Coloanele din shapefile:", world.columns.tolist())
+        if "Țara" in df.columns:
+            # Efectuăm merge-ul pe baza numelui țării
+            merged = world.merge(df, left_on="ADMIN", right_on="Țara", how="left")
+            #st.write("Datele au fost combinate pe baza câmpului 'ADMIN' (din shapefile) cu 'Țara' din datele tale.")
+
+            # Selectarea indicatorului pentru harta tematică (indicator numeric din df)
+            numeric_cols_df = df.select_dtypes(include=[np.number]).columns.tolist()
+            if numeric_cols_df:
+                indicator = st.selectbox("Selectați indicatorul pentru harta interactivă:", numeric_cols_df)
+
+                # Creăm o hartă folium centrată global
+                m = folium.Map(location=[20, 0], zoom_start=2)
+                folium.Choropleth(
+                    geo_data=merged,
+                    name="choropleth",
+                    data=merged,
+                    columns=["ADMIN", indicator],
+                    key_on="feature.properties.ADMIN",
+                    fill_color="OrRd",
+                    fill_opacity=0.7,
+                    line_opacity=0.2,
+                    legend_name=indicator
+                ).add_to(m)
+                folium.LayerControl().add_to(m)
+
+                st.markdown("### Hartă interactivă")
+                st_data = st_folium(m, width=700, height=500)
+
+                # Dacă utilizatorul face click pe hartă, preluăm coordonatele click-ului
+                if st_data is not None and 'last_clicked' in st_data and st_data['last_clicked'] is not None:
+                    coords = st_data['last_clicked']  # Dict: {"lat": ..., "lng": ...}
+                    pt = Point(coords['lng'], coords['lat'])
+                    # Găsim țara care conține punctul
+                    selected_country = merged[merged.contains(pt)]
+                    if not selected_country.empty:
+                        country_name = selected_country.iloc[0]["ADMIN"]
+                        indicator_val = selected_country.iloc[0][indicator]
+                        st.markdown("### Țara selectată")
+                        st.write(f"Țara: **{country_name}**")
+                        st.write(f"Valoarea indicatorului **{indicator}**: **{indicator_val}**")
+                    else:
+                        st.write("Nu s-a putut identifica nicio țară la clic.")
+            else:
+                st.write("Nu există indicatori numerici disponibili în datele tale.")
+        else:
+            st.error("Coloana 'Țara' nu există în setul tău de date.")
 #########################################
 # Secțiunea: REGRESIE MULTIPLA
 #########################################
